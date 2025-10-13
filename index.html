@@ -1,10 +1,65 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
-<html lang="en" style="width:100%; height:100%;">
+<!doctype html>
+<html lang="pt-br">
 <head>
-  <meta http-equiv="content-type" content="text/html; charset=utf-8">
-  <title>arnaldo | Resume</title>
+  <meta charset="utf-8">
+  <title>Arnaldo — Links</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --fg:#e5e7eb; --muted:#94a3b8; }
+    * { box-sizing:border-box; }
+    body {
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial;
+      background:linear-gradient(180deg,#0b1220,#0f172a 30%,#0b1220);
+      color:var(--fg); display:flex; min-height:100svh; align-items:center; justify-content:center; padding:24px;
+    }
+    .wrap { width:100%; max-width:720px; }
+    header { text-align:center; margin-bottom:24px; }
+    h1 { margin:0 0 8px; font-size:clamp(24px,4vw,36px); letter-spacing:.5px; }
+    p.lead { margin:0; color:var(--muted); }
+    .grid {
+      display:grid; gap:14px;
+      grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+      margin-top:20px;
+    }
+    a.card {
+      display:block; padding:16px 18px; text-decoration:none; color:inherit;
+      background:rgba(17,24,39,.8); border:1px solid rgba(148,163,184,.2);
+      border-radius:16px; backdrop-filter:saturate(140%) blur(6px);
+      transition:.2s transform ease, .2s border-color ease, .2s box-shadow ease;
+    }
+    a.card:hover { transform:translateY(-2px); border-color:#94a3b8; box-shadow:0 8px 24px rgba(0,0,0,.35); }
+    .card h2 { margin:0 0 6px; font-size:18px; }
+    .card p { margin:0; color:var(--muted); font-size:14px; line-height:1.3; }
+    footer { text-align:center; margin-top:22px; color:var(--muted); font-size:12px; }
+  </style>
 </head>
-  <body style="width:100%; height:100%; margin:0;">
-    <iframe src="https://docs.google.com/gview?url=https://github.com/arnaldoleandro/resume/raw/main/Arnaldo_Leandro_Senior_SAS_Developer.pdf &embedded=true" style="width:100%; height:100%;" frameborder="0"></iframe>
-  </body>
+<body>
+  <main class="wrap">
+    <header>
+      <h1>@arnaldoleandro</h1>
+      <p class="lead">Projetos e páginas públicas</p>
+    </header>
+
+    <section class="grid">
+      <a class="card" href="./resume.html">
+        <h2>Currículo (PDF)</h2>
+        <p>Visualizar meu currículo em PDF.</p>
+      </a>
+
+      <a class="card" href="https://arnaldoleandro.github.io/formulario/">
+        <h2>Formulário</h2>
+        <p>Página do repositório <code>formulario</code> publicada no GitHub Pages.</p>
+      </a>
+
+      <!-- Exemplo de novo link futuro:
+      <a class="card" href="https://arnaldoleandro.github.io/outro-projeto/">
+        <h2>Outro Projeto</h2>
+        <p>Descrição curta do projeto.</p>
+      </a>
+      -->
+    </section>
+
+    <footer>Feito com GitHub Pages</footer>
+  </main>
+</body>
 </html>
