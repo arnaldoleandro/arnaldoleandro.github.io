@@ -1,4 +1,4 @@
-/** Local screenshot reader; no network, OCR, credentials, or external libraries.
+﻿/** Local screenshot reader; no network, OCR, credentials, or external libraries.
  * All rectangles use ORIGINAL image pixels. Board is row-major, 8 × 8.
  * Colors: 0 empty, 1 green, 2 gold, 3 cyan, 4 pink, 5 plain.
  * Pieces contain [rowOffset, columnOffset, color] triples.
@@ -15,7 +15,8 @@ function raster(image) {
   const height = image.naturalHeight || image.height;
   if (!width || !height || width < 16 || height < 16 || width > SIZE_LIMIT || height > SIZE_LIMIT || width * height > 50000000)
     throw new Error('Imagem inválida ou grande demais (máximo 50 megapixels / 12000 px).');
-  const scale = Math.min(1, 900 / Math.max(width, height));
+  // Preserve the tiny line-art gems in the three trays (often only 12px wide).
+  const scale = Math.min(1, 1600 / Math.max(width, height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(width * scale);
   canvas.height = Math.round(height * scale);
@@ -80,7 +81,51 @@ function sample(im, x, y, w, h) {
   let gem = 1;
   for (let c = 2; c <= 4; c++) if (votes[c] > votes[gem]) gem = c;
   if (votes[gem] >= 8 && (best === 5 || votes[gem] > votes[best])) best = gem;
+  if(best===5 || best===2){
+    // Remove smooth illumination with a local second derivative. Plain amber
+    // faces have gradients; the orange gem drawing has enclosed interior edges.
+    let ink=0, edges=0, tested=0;
+    const stride=Math.max(1,Math.floor(Math.min(w,h)/36));
+    for(let py=Math.ceil(y+h*.28);py<y+h*.72;py+=stride)for(let px=Math.ceil(x+w*.28);px<x+w*.72;px+=stride){
+      const [r,g,b]=rgb(im,px,py), l=rgb(im,px-1,py), rr=rgb(im,px+1,py), u=rgb(im,px,py-1),d=rgb(im,px,py+1);
+      const contrast=Math.abs(4*g-l[1]-rr[1]-u[1]-d[1]);
+      if(r>145&&r>g*1.42&&g>b*1.3&&g<165&&b<100){ink++;if(contrast>18)edges++;}tested++;
+    }
+    if(ink>=3&&edges>=3&&edges/tested>.025)best=2;
+  }
   return { color: best, confidence: votes[best] / votes.reduce((a, b) => a + b, 0) };
+}
+
+// Component extraction from geometry masks, independent of gem color labels.
+function regions(im,r,predicate){
+  const x0=Math.max(0,Math.floor(r.x)),y0=Math.max(0,Math.floor(r.y)),w=Math.min(im.width-x0,Math.ceil(r.width)),h=Math.min(im.height-y0,Math.ceil(r.height));
+  const mask=new Uint8Array(w*h),found=[];
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(predicate(...rgb(im,x0+x,y0+y)))mask[y*w+x]=1;
+  for(let start=0;start<mask.length;start++)if(mask[start]){
+    const q=[start];mask[start]=0;let minx=w,miny=h,maxx=0,maxy=0;
+    for(let i=0;i<q.length;i++){const at=q[i],x=at%w,y=Math.floor(at/w);minx=Math.min(minx,x);maxx=Math.max(maxx,x);miny=Math.min(miny,y);maxy=Math.max(maxy,y);
+      for(const next of [x?at-1:-1,x<w-1?at+1:-1,y?at-w:-1,y<h-1?at+w:-1])if(next>=0&&mask[next]){mask[next]=0;q.push(next);}}
+    if(q.length>=9)found.push({x:x0+minx,y:y0+miny,width:maxx-minx+1,height:maxy-miny+1,area:q.length});
+  }return found;
+}
+function gridByCells(im){
+  const cells=regions(im,{x:0,y:0,width:im.width,height:im.height*.92},(r,g,b)=>r>=68&&r<132&&Math.max(r,g,b)-Math.min(r,g,b)<45&&r>=b)
+    .filter(c=>c.width>im.width*.055&&c.width<im.width*.145&&Math.abs(c.width-c.height)<4&&c.area>c.width*c.height*.85);
+  if(cells.length<8)return null;
+  const sizes=cells.map(c=>(c.width+c.height)/2).sort((a,b)=>a-b),tile=sizes[Math.floor(sizes.length/2)];
+  const group=cells.filter(c=>Math.abs(c.width-tile)<3&&Math.abs(c.height-tile)<3);
+  let best=null;
+  for(let gap=1;gap<=4;gap++){const pitch=tile+gap;
+    for(const cell of group)for(let row=0;row<8;row++){
+      const y=cell.y-gap/2-row*pitch,x=(im.width-8*pitch)/2;
+      if(y<0||y+pitch*8>im.height*.96)continue;
+      // Horizontal position is refined from the observed cell lattice.
+      const col=Math.round((cell.x-x)/pitch),left=cell.x-gap/2-col*pitch;
+      const fit=group.filter(c=>{const cr=(c.y-y-gap/2)/pitch,cc=(c.x-left-gap/2)/pitch;return cr>-.05&&cr<7.05&&cc>-.05&&cc<7.05&&Math.abs(cr-Math.round(cr))<.035&&Math.abs(cc-Math.round(cc))<.035;});
+      const score=fit.length-Math.abs(left+pitch*4-im.width/2)/im.width;
+      if(fit.length>=8&&(!best||score>best.score))best={x:left,y,width:pitch*8,height:pitch*8,score};
+    }
+  }return best;
 }
 
 function boardFrom(im, r) {
@@ -94,6 +139,7 @@ export async function parseBoard(image, bounds) {
 }
 
 function detectBoard(im) {
+  const lattice=gridByCells(im);if(lattice)return lattice;
   // The board has eight equal dark tile interiors. Seek the square with the
   // strongest regularly spaced borders in the central portrait game area.
   const fallbackSide = Math.min(im.width * .86, im.height * .64);
@@ -156,7 +202,7 @@ function components(im, r) {
   return result;
 }
 
-function pieceFrom(im, r) {
+function legacyPieceFrom(im, r) {
   const candidates = components(im, r).filter(c => c.width / c.height > .35 && c.width / c.height < 2.8
     && c.area < r.width * r.height * .55);
   if (!candidates.length) return [];
@@ -187,6 +233,37 @@ function pieceFrom(im, r) {
   return [...cells.values()].sort((a, b) => a.row - b.row || a.col - b.col).map(c => [c.row, c.col, c.color]);
 }
 
+function tilePixel(r,g,b){
+  const c=classifyColor(r,g,b);
+  return ((c===1||c===3||c===4)&&Math.max(r,g,b)>150) || (r>195&&g>148&&b>20&&r>g&&g>b);
+}
+function pieceFrom(im,r){
+  // Segment bright tile faces, not icons: plain neighbours must remain cells.
+  const parts=regions(im,r,tilePixel).filter(c=>c.area>=10&&c.width>=Math.max(3,r.width*.065)&&c.height>=Math.max(3,r.width*.065)&&c.area>c.width*c.height*.35&&c.width/c.height>.15&&c.width/c.height<6);
+  if(!parts.length)return [];
+  const x=Math.min(...parts.map(c=>c.x)),y=Math.min(...parts.map(c=>c.y));
+  const width=Math.max(...parts.map(c=>c.x+c.width))-x,height=Math.max(...parts.map(c=>c.y+c.height))-y;
+  const sizes=parts.map(c=>Math.min(c.width,c.height)).sort((a,b)=>a-b),typical=sizes[Math.floor(sizes.length/2)];
+  let best=null;
+  for(let rows=1;rows<=5;rows++)for(let cols=1;cols<=5;cols++){
+    const pw=width/cols,ph=height/rows,pitch=(pw+ph)/2;
+    if(pitch<Math.max(5,r.width*.09)||pitch>r.width*.28||Math.abs(pw-ph)>Math.max(2,pitch*.16))continue;
+    const cells=[];let error=0,ambiguous=0;
+    for(let row=0;row<rows;row++)for(let col=0;col<cols;col++){
+      let yes=0,n=0;
+      for(let dy=.15;dy<.9;dy+=.1)for(let dx=.15;dx<.9;dx+=.1){if(tilePixel(...rgb(im,x+(col+dx)*pw,y+(row+dy)*ph)))yes++;n++;}
+      const fill=yes/n;if(fill>.30){cells.push([row,col,sample(im,x+col*pw,y+row*ph,pw,ph).color||5]);error+=1-fill;if(fill<.6)ambiguous++;}else error+=fill;
+    }
+    if(!cells.length||cells.length>6)continue;
+    // Prefer complete square faces over subdividing a tile or joining a row.
+    const score=error/(rows*cols)+Math.abs(pw-ph)/pitch+ambiguous*.2+Math.abs(pitch-typical)/typical*.3;
+    if(!best||score<best.score)best={cells,score};
+  }
+  if(!best)return legacyPieceFrom(im,r);
+  const minr=Math.min(...best.cells.map(c=>c[0])),minc=Math.min(...best.cells.map(c=>c[1]));
+  return best.cells.map(([row,col,color])=>[row-minr,col-minc,color]);
+}
+
 export async function parsePieces(image, pieceBounds) {
   if (!Array.isArray(pieceBounds) || pieceBounds.length !== 3) throw new Error('Selecione os três retângulos das peças.');
   const im = raster(image);
@@ -196,16 +273,17 @@ export async function parsePieces(image, pieceBounds) {
 export async function parseScreenshot(image) {
   const im = raster(image), found = detectBoard(im);
   const bounds = original(im, found);
-  const trayTop = Math.min(im.height - 8, found.y + found.height + found.width * .035);
-  const trayHeight = Math.max(8, Math.min(found.width * .40, im.height * .94 - trayTop));
+  const trayTop = Math.min(im.height - 8, found.y + found.height + found.width * .15);
+  const trayHeight = Math.max(8, Math.min(found.width * .33, im.height * .90 - trayTop));
   const tray = Array.from({ length: 3 }, (_, i) => ({
-    x: i * im.width / 3 + im.width * .025, y: trayTop,
-    width: im.width / 3 - im.width * .05, height: trayHeight,
+    x: Math.max(0,found.x+found.width*(-.02+i*.35)), y: trayTop,
+    width: Math.min(found.width*.34,im.width-Math.max(0,found.x+found.width*(-.02+i*.35))), height: trayHeight,
   }));
   const pieces = tray.map(r => pieceFrom(im, r));
   const warnings = ['Leitura local aproximada: confira as 64 casas, as peças e os contadores antes de calcular.'];
   if (found.score < 10) warnings.push('Grade não identificada com segurança. Ajuste o retângulo do tabuleiro.');
-  if (pieces.some(p => !p.length || p.length > 5)) warnings.push('Uma ou mais peças precisam de correção manual ou de outro recorte.');
+  if (pieces.some(p => !p.length || p.length > 6)) warnings.push('Uma ou mais peças precisam de correção manual ou de outro recorte.');
   return { board: boardFrom(im, found), pieces, bounds, pieceBounds: tray.map(r => original(im, r)),
     confidence: Math.max(.05, Math.min(.7, found.score / 50)), warnings };
 }
+
