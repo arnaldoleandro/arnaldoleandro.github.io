@@ -1,8 +1,11 @@
 import {colors,copy,emptyState,toInternal,applyResult,normalizePiece,demoState} from './core.js';
 import {parseScreenshot,parseBoard,parsePieces} from './capture.js';
+import {catalog,geometryKey,rotatePiece,mirrorPiece} from './catalog.js';
+import {installI18n} from './i18n.js';
 const $=id=>document.getElementById(id), STORAGE='gold-coach-state-v1';
 let data=emptyState(), history=[], result=null, context=null, worker=null, busy=false, request=0;
 let paint=1, editBoard=false, editingPiece=-1, image=null, bounds=null, pieceBounds=null, corners=null, calibration=false;
+let freehand=false;
 try{const saved=JSON.parse(localStorage.getItem(STORAGE));if(saved?.version===1)data=saved.data;}catch{ /* Private mode may disable storage. */ }
 function status(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error);}
 function persist(){try{localStorage.setItem(STORAGE,JSON.stringify({version:1,data}));}catch{ /* State export remains available. */ }}
@@ -35,16 +38,29 @@ function goals(){
   $('goals').replaceChildren();data.goals.forEach((goal,index)=>{
     const row=document.createElement('label');row.className='goal';const select=document.createElement('select');select.setAttribute('aria-label',`Cor da meta de ${goal.target}`);
     for(let v=1;v<=4;v++){const o=document.createElement('option');o.value=v;o.textContent=colors[v].name;select.append(o);}select.value=goal.color;
-    select.onchange=()=>{data.goals[index].color=Number(select.value);invalidate();};
+    select.className=`goal-color ${colors[goal.color].cls}`;select.title=colors[goal.color].name;
+    select.onchange=()=>{data.goals[index].color=Number(select.value);select.className=`goal-color ${colors[Number(select.value)].cls}`;select.title=colors[Number(select.value)].name;invalidate();};
     const input=document.createElement('input');input.type='number';input.min=0;input.max=1000;input.value=goal.count;input.setAttribute('aria-label',`Gemas coletadas da meta ${index+1}`);input.onchange=()=>{data.goals[index].count=Number(input.value);invalidate();};
     const total=document.createElement('span');total.textContent=`/ ${goal.target}`;row.append(select,input,total);$('goals').append(row);
   });
 }
-for(let v=0;v<colors.length;v++){const b=document.createElement('button');b.type='button';b.innerHTML=`<span class="swatch ${colors[v].cls}"></span>${colors[v].name}`;b.dataset.color=v;b.classList.toggle('selected',v===paint);b.onclick=()=>{paint=v;document.querySelectorAll('#palette button').forEach(x=>x.classList.toggle('selected',Number(x.dataset.color)===v));};$('palette').append(b);}
-function openEditor(slot){editingPiece=slot;$('piece-editor').hidden=false;$('editor-title').textContent=`Editar peça ${slot+1}`;document.querySelector('.editing').open=true;renderEditor();}
-function renderEditor(){const grid=$('editor-grid');grid.replaceChildren();for(let r=0;r<5;r++)for(let c=0;c<5;c++){const v=data.pieces[editingPiece].find(p=>p[0]===r&&p[1]===c)?.[2]||0,b=cell(v);b.setAttribute('aria-label',`Peça: linha ${r+1}, coluna ${c+1}, ${colors[v].name}`);b.onclick=()=>{data.pieces[editingPiece]=data.pieces[editingPiece].filter(p=>p[0]!==r||p[1]!==c);if(paint)data.pieces[editingPiece].push([r,c,paint]);invalidate();renderEditor();};grid.append(b);}}
+for(const target of ['palette','piece-palette'])for(let v=0;v<colors.length;v++){const b=document.createElement('button');b.type='button';b.innerHTML=`<span class="swatch ${colors[v].cls}"></span>${colors[v].name}`;b.dataset.color=v;b.classList.toggle('selected',v===paint);b.onclick=()=>{paint=v;syncPalette();};$(target).append(b);}
+function syncPalette(){document.querySelectorAll('.palette button').forEach(x=>{x.classList.toggle('selected',Number(x.dataset.color)===paint);x.disabled=x.parentElement.id==='piece-palette'&&Number(x.dataset.color)===0&&!freehand;});}
+function openEditor(slot){editingPiece=slot;freehand=false;if(!paint)paint=5;$('editor-title').textContent=`Editar peça ${slot+1}`;renderEditor();$('piece-dialog').showModal();}
+function renderEditor(){
+  syncPalette();$('freehand').setAttribute('aria-pressed',String(freehand));
+  const grid=$('editor-grid');grid.replaceChildren();grid.classList.toggle('freehand',freehand);
+  for(let r=0;r<5;r++)for(let c=0;c<5;c++){const v=data.pieces[editingPiece].find(p=>p[0]===r&&p[1]===c)?.[2]||0,b=cell(v);b.setAttribute('aria-label',`Peça: linha ${r+1}, coluna ${c+1}, ${colors[v].name}`);b.disabled=!v&&!freehand;b.onclick=()=>{data.pieces[editingPiece]=data.pieces[editingPiece].filter(p=>p[0]!==r||p[1]!==c);if(paint)data.pieces[editingPiece].push([r,c,paint]);invalidate();renderEditor();};grid.append(b);}
+  const key=geometryKey(data.pieces[editingPiece]);document.querySelectorAll('#shape-picker>button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.key===key)));
+}
+for(const shape of catalog){const button=document.createElement('button');button.type='button';button.className='shape-option';button.dataset.key=shape.key;button.title=shape.label;button.setAttribute('aria-label',shape.label);const miniature=document.createElement('span');miniature.className='shape-mini';for(const [r,c] of shape.cells){const tile=document.createElement('span');tile.style.gridRow=r+1;tile.style.gridColumn=c+1;miniature.append(tile);}button.append(miniature);button.onclick=()=>{const old=data.pieces[editingPiece];data.pieces[editingPiece]=shape.cells.map(([r,c])=>[r,c,old.find(p=>p[0]===r&&p[1]===c)?.[2]||5]);freehand=false;if(!paint)paint=5;invalidate();renderEditor();};$('shape-picker').append(button);}
+$('rotate-piece').onclick=()=>{data.pieces[editingPiece]=rotatePiece(data.pieces[editingPiece]);invalidate();renderEditor();};
+$('mirror-piece').onclick=()=>{data.pieces[editingPiece]=mirrorPiece(data.pieces[editingPiece]);invalidate();renderEditor();};
+$('freehand').onclick=()=>{freehand=!freehand;if(!freehand&&!paint)paint=5;renderEditor();};
 $('editor-clear').onclick=()=>{data.pieces[editingPiece]=[];invalidate();renderEditor();};
-$('editor-done').onclick=()=>{data.pieces[editingPiece]=normalizePiece(data.pieces[editingPiece]);$('piece-editor').hidden=true;editingPiece=-1;invalidate();};
+function closeEditor(){if(editingPiece<0)return;data.pieces[editingPiece]=normalizePiece(data.pieces[editingPiece]);editingPiece=-1;$('piece-dialog').close();invalidate();}
+$('editor-done').onclick=closeEditor;$('editor-close').onclick=closeEditor;
+$('piece-dialog').addEventListener('cancel',e=>{e.preventDefault();closeEditor();});
 $('edit-board').onclick=()=>{editBoard=!editBoard;$('edit-board').textContent=editBoard?'Concluir edição do grid':'Ativar edição do grid';render();};
 $('moves').onchange=()=>{data.moves=Number($('moves').value);invalidate();};$('confirmed').onchange=render;
 $('demo').onclick=()=>{data=demoState();history=[];invalidate();goals();status('Exemplo carregado. Confira o estado e marque a confirmação para analisar.');};
@@ -60,6 +76,7 @@ function startWorker(){if(worker)return;worker=new Worker(new URL('./worker.js',
 }
 $('solve').onclick=()=>{try{context=toInternal(data);busy=true;request++;startWorker();worker.postMessage({type:'solve',id:request,state:context.state});render();status('Preparando análise. O primeiro carregamento pode levar alguns segundos…');}catch(e){busy=false;status(e.message,true);render();}};
 function renderResult(){
+  $('output-empty').hidden=true;
   const slot=context.slots[result.action.piece_index], rows=result.placement_cells.map(c=>c[0]+1), cols=result.placement_cells.map(c=>c[1]+1);
   $('recommendation').hidden=false;$('result-title').textContent=`Peça ${slot+1} · linha ${Math.min(...rows)}, coluna ${Math.min(...cols)}`;
   const certified=['certified','queue','immediate'].includes(result.decision.source);
@@ -77,7 +94,7 @@ $('apply').onclick=()=>{
   status(won?'Metas concluídas no simulador! Confira a tela de vitória no jogo.':data.pieces.some(p=>p.length)?'Estado atualizado. Confira no jogo e peça a próxima posição.':'Mão concluída. Importe o print com as três peças novas.');
 };
 $('undo').onclick=()=>{if(!history.length)return;data=history.pop().data;invalidate();goals();status('Última confirmação desfeita. Confira o tabuleiro.');};
-$('reset').onclick=()=>{if(!confirm('Começar outro jogo e limpar o tabuleiro atual?'))return;data=emptyState();history=[];invalidate();goals();status('Novo jogo. Importe o print ou desenhe as peças.');};
+$('reset').onclick=()=>{if(!confirm(i18n.translate('Começar outro jogo e limpar o tabuleiro atual?')))return;data=emptyState();history=[];invalidate();goals();status('Novo jogo. Importe o print ou desenhe as peças.');};
 $('export').onclick=()=>{const blob=new Blob([JSON.stringify({version:1,data,history},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='gold-coach-partida.json';a.click();URL.revokeObjectURL(url);};
 async function loadImage(file){
   if(!file?.type.startsWith('image/'))return status('Escolha um arquivo de imagem.',true);
@@ -103,3 +120,4 @@ $('capture').onclick=async e=>{if(!calibration||!image)return;const rect=e.curre
 };
 $('clear-image').onclick=()=>{image=null;bounds=null;calibration=false;corners=null;$('capture-panel').hidden=true;};
 goals();render();
+const i18n=installI18n({button:$('language')});
